@@ -84,7 +84,7 @@ class LocationUpdatesService : Service() {
                     .setContentTitle(NOTIFICATION_TITLE)
                     .setOngoing(true)
                     .setSound(null)
-                    .setPriority(NotificationCompat.PRIORITY_HIGH)
+                    .setPriority(NotificationCompat.PRIORITY_DEFAULT)
                     .setSmallIcon(resources.getIdentifier(NOTIFICATION_ICON, "mipmap", packageName))
                     .setWhen(System.currentTimeMillis())
                     .setStyle(NotificationCompat.BigTextStyle().bigText(NOTIFICATION_MESSAGE))
@@ -159,7 +159,6 @@ class LocationUpdatesService : Service() {
             registerReceiver(broadcastReceiver, filter)
         }
 
-
         updateNotification() // to start the foreground service
     }
 
@@ -167,6 +166,7 @@ class LocationUpdatesService : Service() {
     fun requestLocationUpdates() {
         Utils.setRequestingLocationUpdates(this, true)
         try {
+            mFusedLocationClient!!.removeLocationUpdates(mFusedLocationCallback!!)
             if (isGoogleApiAvailable && !this.forceLocationManager) {
                 mFusedLocationClient!!.requestLocationUpdates(mLocationRequest!!,
                     mFusedLocationCallback!!, Looper.myLooper())
@@ -209,6 +209,7 @@ class LocationUpdatesService : Service() {
     }
 
     fun removeLocationUpdates() {
+        mFusedLocationClient!!.removeLocationUpdates(mFusedLocationCallback!!)
         stopForeground(true)
         stopSelf()
     }
@@ -238,7 +239,7 @@ class LocationUpdatesService : Service() {
     }
 
 
-    private fun createLocationRequest(distanceFilter: Double) {
+    fun createLocationRequest(distanceFilter: Double) {
         mLocationRequest = LocationRequest()
         mLocationRequest!!.interval = UPDATE_INTERVAL_IN_MILLISECONDS
         mLocationRequest!!.fastestInterval = FASTEST_UPDATE_INTERVAL_IN_MILLISECONDS

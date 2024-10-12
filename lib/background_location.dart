@@ -76,7 +76,8 @@ class BackgroundLocation {
       if (methodCall.method == 'location') {
         var locationData = Map.from(methodCall.arguments);
         // Call the user passed function
-        location(
+        try {
+          location(
           Location(
               latitude: locationData['latitude'],
               longitude: locationData['longitude'],
@@ -87,6 +88,11 @@ class BackgroundLocation {
               time: locationData['time'],
               isMock: locationData['is_mock']),
         );
+        }
+        catch(e) {
+          //print(e.toString());
+        }
+          
       }
     });
   }

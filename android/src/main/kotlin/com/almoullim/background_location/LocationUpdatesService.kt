@@ -232,6 +232,8 @@ class LocationUpdatesService : Service() {
     }
 
     private fun onNewLocation(location: Location) {
+
+        LifecycleLogger.log(this, "LocationUpdatesService - received location $location")
         mLocation = location
         val intent = Intent(ACTION_BROADCAST)
         intent.putExtra(EXTRA_LOCATION, location)

@@ -60,18 +60,22 @@ class BackgroundLocationService: MethodChannel.MethodCallHandler, PluginRegistry
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, service: IBinder) {
+            context?.let { LifecycleLogger.log(it, "ServiceConnection: onServiceConnected - bound=$bound") }
             bound = true
             val binder = service as LocationUpdatesService.LocalBinder
             this@BackgroundLocationService.service = binder.service
+            context?.let { LifecycleLogger.log(it, "ServiceConnection: Service bound successfully, requesting location") }
             requestLocation()
         }
 
         override fun onServiceDisconnected(name: ComponentName) {
+            context?.let { LifecycleLogger.log(it, "ServiceConnection: onServiceDisconnected") }
             service = null
         }
     }
 
     fun onAttachedToEngine(@NonNull context: Context, @NonNull messenger: BinaryMessenger) {
+        LifecycleLogger.log(context, "onAttachedToEngine: Starting - isAttached=$isAttached, bound=$bound")
         this.context = context
         isAttached = true
         channel = MethodChannel(messenger, METHOD_CHANNEL_NAME)
@@ -80,47 +84,86 @@ class BackgroundLocationService: MethodChannel.MethodCallHandler, PluginRegistry
         receiver = MyReceiver()
 
         LocalBroadcastManager.getInstance(context).registerReceiver(receiver!!,
-                IntentFilter(LocationUpdatesService.ACTION_BROADCAST))
+            IntentFilter(LocationUpdatesService.ACTION_BROADCAST))
+
+        // NEW: Check if service is already running and rebind if needed
+        if (isLocationServiceRunning() && !bound) {
+            Log.d(BackgroundLocationPlugin.TAG, "Service already running, rebinding...")
+            LifecycleLogger.log(context, "onAttachedToEngine: Service already running, rebinding")
+            rebindToExistingService()
+        } else {
+            LifecycleLogger.log(context, "onAttachedToEngine: Complete - isServiceRunning=${isLocationServiceRunning()}, bound=$bound")
+        }
+    }
+
+    // NEW METHOD: Rebind to an already-running service
+    private fun rebindToExistingService() {
+        context?.let { LifecycleLogger.log(it, "rebindToExistingService: Attempting to rebind to existing service") }
+        val intent = Intent(context, LocationUpdatesService::class.java)
+        context!!.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
     }
 
     fun onDetachedFromEngine() {
+        context?.let { LifecycleLogger.log(it, "onDetachedFromEngine: Detaching - bound=$bound") }
         channel.setMethodCallHandler(null)
         context = null
         isAttached = false
     }
 
     fun setActivity(binding: ActivityPluginBinding?) {
+        context?.let { LifecycleLogger.log(it, "setActivity: binding=${binding != null}, bound=$bound") }
         this.activity = binding?.activity
 
         if(this.activity != null){
-            if (Utils.requestingLocationUpdates(context!!)) {
+            context?.let { LifecycleLogger.log(it, "setActivity: Activity attached, isServiceRunning=${isLocationServiceRunning()}") }
+            // NEW: Check if service is running and rebind
+            if (isLocationServiceRunning() && !bound) {
+                Log.d(BackgroundLocationPlugin.TAG, "Activity attached, rebinding to existing service")
+                context?.let { LifecycleLogger.log(it, "setActivity: Rebinding to existing service") }
+                rebindToExistingService()
+            } else if (Utils.requestingLocationUpdates(context!!)) {
                 if (!checkPermissions()) {
+                    context?.let { LifecycleLogger.log(it, "setActivity: Requesting permissions") }
                     requestPermissions()
                 }
             }
         } else {
+            context?.let { LifecycleLogger.log(it, "setActivity: Activity null, stopping location service") }
             stopLocationService()
         }
     }
 
     private var distanceFilter: Double = 0.0
     private fun startLocationService(distanceFilter: Double?, forceLocationManager : Boolean?): Int {
+        context?.let { LifecycleLogger.log(it, "startLocationService: Called with distanceFilter=$distanceFilter, isServiceRunning=${isLocationServiceRunning()}, bound=$bound") }
 
         if (distanceFilter != null) {
             this.distanceFilter = distanceFilter
-        };
+        }
+
+        // NEW: If already running, just rebind instead of starting new
+        if (isLocationServiceRunning()) {
+            Log.d(BackgroundLocationPlugin.TAG, "Service already running, rebinding instead of starting")
+            context?.let { LifecycleLogger.log(it, "startLocationService: Service already running, rebinding instead of starting") }
+            if (!bound) {
+                rebindToExistingService()
+            }
+            return 0
+        }
 
         if (!checkPermissions()) {
-            requestPermissions();
-        }
-        else {
+            context?.let { LifecycleLogger.log(it, "startLocationService: Permissions not granted, requesting") }
+            requestPermissions()
+        } else {
+            context?.let { LifecycleLogger.log(it, "startLocationService: Permissions granted, starting service") }
             reallyStartLocationService()
         }
-        return 0;
-
+        return 0
     }
 
     private fun reallyStartLocationService() {
+        context?.let { LifecycleLogger.log(it, "reallyStartLocationService: Starting service with distanceFilter=$distanceFilter, bound=$bound") }
+
         LocalBroadcastManager.getInstance(context!!).registerReceiver(receiver!!,
             IntentFilter(LocationUpdatesService.ACTION_BROADCAST))
         if (!bound) {
@@ -128,6 +171,9 @@ class BackgroundLocationService: MethodChannel.MethodCallHandler, PluginRegistry
             intent.putExtra("distance_filter", this.distanceFilter)
             intent.putExtra("force_location_manager", false)
             context!!.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+            context?.let { LifecycleLogger.log(it, "reallyStartLocationService: bindService called") }
+        } else {
+            context?.let { LifecycleLogger.log(it, "reallyStartLocationService: Already bound, skipping bindService") }
         }
     }
 
@@ -145,30 +191,40 @@ class BackgroundLocationService: MethodChannel.MethodCallHandler, PluginRegistry
     }
 
     private fun stopLocationService(): Int {
+        context?.let { LifecycleLogger.log(it, "stopLocationService: Stopping service, bound=$bound") }
+
         service?.removeLocationUpdates()
         LocalBroadcastManager.getInstance(context!!).unregisterReceiver(receiver!!)
 
         if (bound) {
             context!!.unbindService(serviceConnection)
             bound = false
+            context?.let { LifecycleLogger.log(it, "stopLocationService: Service unbound") }
         }
 
         return 0
     }
 
     private fun setAndroidNotification(title: String?, message: String?, icon: String?):Int{
+        context?.let { LifecycleLogger.log(it, "setAndroidNotification: title=$title, message=$message, icon=$icon") }
+
         if (title != null) LocationUpdatesService.NOTIFICATION_TITLE = title
         if (message != null) LocationUpdatesService.NOTIFICATION_MESSAGE = message
         if (icon != null) LocationUpdatesService.NOTIFICATION_ICON = icon
 
         if (service != null) {
             service?.updateNotification()
+            context?.let { LifecycleLogger.log(it, "setAndroidNotification: Notification updated") }
+        } else {
+            context?.let { LifecycleLogger.log(it, "setAndroidNotification: Service is null, cannot update notification") }
         }
 
         return 0
     }
 
     private fun setConfiguration(timeInterval: Long?):Int {
+        context?.let { LifecycleLogger.log(it, "setConfiguration: timeInterval=$timeInterval") }
+
         if (timeInterval != null) {
             LocationUpdatesService.UPDATE_INTERVAL_IN_MILLISECONDS = timeInterval
             LocationUpdatesService.FASTEST_UPDATE_INTERVAL_IN_MILLISECONDS = timeInterval/2
@@ -181,10 +237,16 @@ class BackgroundLocationService: MethodChannel.MethodCallHandler, PluginRegistry
     }
 
     override fun onMethodCall(@NonNull call: MethodCall, @NonNull result: MethodChannel.Result) {
+        context?.let { LifecycleLogger.log(it, "onMethodCall: method=${call.method}") }
+
         when (call.method) {
             "stop_location_service" -> result.success(stopLocationService())
             "start_location_service" -> result.success(startLocationService(call.argument("distance_filter"), call.argument("force_location_manager")))
-            "is_service_running" -> result.success(isLocationServiceRunning())
+            "is_service_running" -> {
+                val running = isLocationServiceRunning()
+                context?.let { LifecycleLogger.log(it, "onMethodCall: is_service_running=$running") }
+                result.success(running)
+            }
             "set_android_notification" -> result.success(setAndroidNotification(call.argument("title"),call.argument("message"),call.argument("icon")))
             "set_configuration" -> result.success(setConfiguration(call.argument<String>("interval")?.toLongOrNull()))
             else -> result.notImplemented()
@@ -196,9 +258,12 @@ class BackgroundLocationService: MethodChannel.MethodCallHandler, PluginRegistry
      * If permission is denied, it requests the needed permission
      */
     private fun requestLocation() {
+        context?.let { LifecycleLogger.log(it, "requestLocation: checkPermissions=${checkPermissions()}") }
+
         if (!checkPermissions()) {
             requestPermissions()
         } else {
+            context?.let { LifecycleLogger.log(it, "requestLocation: Requesting location updates from service") }
             service?.requestLocationUpdates()
         }
     }
@@ -216,18 +281,23 @@ class BackgroundLocationService: MethodChannel.MethodCallHandler, PluginRegistry
      * Depending on the current activity, displays a rationale for the request.
      */
     private fun requestPermissions() {
+        context?.let { LifecycleLogger.log(it, "requestPermissions: activity=${activity != null}") }
+
         if(activity == null) {
+            context?.let { LifecycleLogger.log(it, "requestPermissions: Activity is null, cannot request permissions") }
             return
         }
 
         val shouldProvideRationale = ActivityCompat.shouldShowRequestPermissionRationale(activity!!, Manifest.permission.ACCESS_FINE_LOCATION)
         if (shouldProvideRationale) {
+            context?.let { LifecycleLogger.log(it, "requestPermissions: Showing rationale to user") }
             Toast.makeText(context, R.string.permission_rationale, Toast.LENGTH_LONG).show()
 
         } else {
+            context?.let { LifecycleLogger.log(it, "requestPermissions: Requesting ACCESS_FINE_LOCATION permission") }
             ActivityCompat.requestPermissions(activity!!,
-                    arrayOf(Manifest.permission.ACCESS_FINE_LOCATION),
-                    REQUEST_PERMISSIONS_REQUEST_CODE)
+                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION),
+                REQUEST_PERMISSIONS_REQUEST_CODE)
         }
     }
 
@@ -235,6 +305,8 @@ class BackgroundLocationService: MethodChannel.MethodCallHandler, PluginRegistry
         override fun onReceive(context: Context, intent: Intent) {
             val location = intent.getParcelableExtra<Location>(LocationUpdatesService.EXTRA_LOCATION)
             if (location != null) {
+                LifecycleLogger.log(context, "MyReceiver: Location received - lat=${location.latitude}, lon=${location.longitude}, accuracy=${location.accuracy}")
+
                 val locationMap = HashMap<String, Any>()
                 locationMap["latitude"] = location.latitude
                 locationMap["longitude"] = location.longitude
@@ -245,6 +317,8 @@ class BackgroundLocationService: MethodChannel.MethodCallHandler, PluginRegistry
                 locationMap["time"] = location.time.toDouble()
                 locationMap["is_mock"] = location.isFromMockProvider
                 channel.invokeMethod("location", locationMap, null)
+            } else {
+                LifecycleLogger.log(context, "MyReceiver: Received broadcast but location is null")
             }
         }
     }
@@ -253,12 +327,23 @@ class BackgroundLocationService: MethodChannel.MethodCallHandler, PluginRegistry
      * Handle the response from a permission request
      * @return true if the result has been handled.
      */
-     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray): Boolean{
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray): Boolean{
+        context?.let { LifecycleLogger.log(it, "onRequestPermissionsResult: requestCode=$requestCode, grantResults=${grantResults.contentToString()}") }
+
         if (requestCode == REQUEST_PERMISSIONS_REQUEST_CODE) {
             when {
-                grantResults!!.isEmpty() -> Log.i(BackgroundLocationPlugin.TAG, "User interaction was cancelled.")
-                grantResults[0] == PackageManager.PERMISSION_GRANTED -> reallyStartLocationService()
-                else -> Toast.makeText(context, R.string.permission_denied_explanation, Toast.LENGTH_LONG).show()
+                grantResults!!.isEmpty() -> {
+                    Log.i(BackgroundLocationPlugin.TAG, "User interaction was cancelled.")
+                    context?.let { LifecycleLogger.log(it, "onRequestPermissionsResult: User interaction was cancelled") }
+                }
+                grantResults[0] == PackageManager.PERMISSION_GRANTED -> {
+                    context?.let { LifecycleLogger.log(it, "onRequestPermissionsResult: Permission granted, starting service") }
+                    reallyStartLocationService()
+                }
+                else -> {
+                    context?.let { LifecycleLogger.log(it, "onRequestPermissionsResult: Permission denied") }
+                    Toast.makeText(context, R.string.permission_denied_explanation, Toast.LENGTH_LONG).show()
+                }
             }
         }
         return true

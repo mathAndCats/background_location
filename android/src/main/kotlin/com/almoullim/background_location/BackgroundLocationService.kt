@@ -74,6 +74,15 @@ class BackgroundLocationService: MethodChannel.MethodCallHandler, PluginRegistry
         }
     }
 
+    private fun flushBufferedLocations() {
+        val locations = service?.getBufferedLocations() ?: return
+        if (locations.isNotEmpty()) {
+            context?.let { LifecycleLogger.log(it, "flushBufferedLocations: Sending ${locations.size} buffered locations to Flutter") }
+            channel.invokeMethod("buffered_locations", locations)
+            service?.clearBufferedLocations()
+        }
+    }
+
     fun onAttachedToEngine(@NonNull context: Context, @NonNull messenger: BinaryMessenger) {
         LifecycleLogger.log(context, "onAttachedToEngine: Starting - isAttached=$isAttached, bound=$bound")
         this.context = context
@@ -86,13 +95,12 @@ class BackgroundLocationService: MethodChannel.MethodCallHandler, PluginRegistry
         LocalBroadcastManager.getInstance(context).registerReceiver(receiver!!,
             IntentFilter(LocationUpdatesService.ACTION_BROADCAST))
 
-        // NEW: Check if service is already running and rebind if needed
-        if (isLocationServiceRunning() && !bound) {
-            Log.d(BackgroundLocationPlugin.TAG, "Service already running, rebinding...")
-            LifecycleLogger.log(context, "onAttachedToEngine: Service already running, rebinding")
-            rebindToExistingService()
-        } else {
-            LifecycleLogger.log(context, "onAttachedToEngine: Complete - isServiceRunning=${isLocationServiceRunning()}, bound=$bound")
+        // Always try to rebind
+        if (!bound) {
+            LifecycleLogger.log(context, "onAttachedToEngine: Attempting to rebind to service")
+            val intent = Intent(context, LocationUpdatesService::class.java)
+            val result = context.bindService(intent, serviceConnection, 0)
+            LifecycleLogger.log(context, "onAttachedToEngine: bindService returned $result")
         }
     }
 
@@ -116,7 +124,7 @@ class BackgroundLocationService: MethodChannel.MethodCallHandler, PluginRegistry
 
         if(this.activity != null){
             context?.let { LifecycleLogger.log(it, "setActivity: Activity attached, isServiceRunning=${isLocationServiceRunning()}") }
-            // NEW: Check if service is running and rebind
+            // Rebind if service is running
             if (isLocationServiceRunning() && !bound) {
                 Log.d(BackgroundLocationPlugin.TAG, "Activity attached, rebinding to existing service")
                 context?.let { LifecycleLogger.log(it, "setActivity: Rebinding to existing service") }
@@ -128,8 +136,10 @@ class BackgroundLocationService: MethodChannel.MethodCallHandler, PluginRegistry
                 }
             }
         } else {
-            context?.let { LifecycleLogger.log(it, "setActivity: Activity null, stopping location service") }
-            stopLocationService()
+            // Activity is null - this is FINE for a foreground service
+            // Just log it, don't stop the service
+            context?.let { LifecycleLogger.log(it, "setActivity: Activity detached, service continues running in background") }
+            // DO NOT call stopLocationService() here
         }
     }
 
@@ -163,13 +173,18 @@ class BackgroundLocationService: MethodChannel.MethodCallHandler, PluginRegistry
 
     private fun reallyStartLocationService() {
         context?.let { LifecycleLogger.log(it, "reallyStartLocationService: Starting service with distanceFilter=$distanceFilter, bound=$bound") }
-
         LocalBroadcastManager.getInstance(context!!).registerReceiver(receiver!!,
             IntentFilter(LocationUpdatesService.ACTION_BROADCAST))
         if (!bound) {
             val intent = Intent(context, LocationUpdatesService::class.java)
             intent.putExtra("distance_filter", this.distanceFilter)
             intent.putExtra("force_location_manager", false)
+            
+            // Start as foreground service first - this triggers onStartCommand
+            ContextCompat.startForegroundService(context!!, intent)
+            context?.let { LifecycleLogger.log(it, "reallyStartLocationService: startForegroundService called") }
+            
+            // Then bind to it
             context!!.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
             context?.let { LifecycleLogger.log(it, "reallyStartLocationService: bindService called") }
         } else {
@@ -178,13 +193,17 @@ class BackgroundLocationService: MethodChannel.MethodCallHandler, PluginRegistry
     }
 
     private fun isLocationServiceRunning(): Boolean {
-        val manager: ActivityManager = context!!.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-        for (service in manager.getRunningServices(Integer.MAX_VALUE)) {
-            if (LocationUpdatesService::class.java.getName() == service.service.getClassName()) {
-                if (service.foreground)
-                    return true
-                else
-                    return false
+        // If we're bound, service is definitely running
+        if (bound && service != null) {
+            return true
+        }
+        
+        // Fallback to ActivityManager check
+        val manager = context!!.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        @Suppress("DEPRECATION")
+        for (serviceInfo in manager.getRunningServices(Integer.MAX_VALUE)) {
+            if (LocationUpdatesService::class.java.name == serviceInfo.service.className) {
+                return serviceInfo.foreground
             }
         }
         return false
@@ -249,6 +268,47 @@ class BackgroundLocationService: MethodChannel.MethodCallHandler, PluginRegistry
             }
             "set_android_notification" -> result.success(setAndroidNotification(call.argument("title"),call.argument("message"),call.argument("icon")))
             "set_configuration" -> result.success(setConfiguration(call.argument<String>("interval")?.toLongOrNull()))
+
+            "set_recording_state" -> {
+                val isRecording = call.argument<Boolean>("is_recording") ?: false
+                if (service != null) {
+                    service?.setRecording(isRecording)
+                } else {
+                    // Fallback if not bound yet - can only set persisted state, won't reset buffer tracking
+                    LocationUpdatesService.setRecordingState(context!!, isRecording)
+                }
+                context?.let { LifecycleLogger.log(it, "onMethodCall: set_recording_state=$isRecording") }
+                result.success(0)
+            }
+            "get_buffered_locations" -> {
+                val locations = service?.getBufferedLocations() ?: run {
+                    // Service might not be bound, read directly from DB
+                    val buffer = LocationBuffer(context!!)
+                    buffer.getAll()
+                }
+                context?.let { LifecycleLogger.log(it, "onMethodCall: get_buffered_locations count=${locations.size}") }
+                result.success(locations)
+            }
+            "clear_buffered_locations" -> {
+                if (service != null) {
+                    service?.clearBufferedLocations()
+                } else {
+                    // Service might not be bound, clear directly
+                    val buffer = LocationBuffer(context!!)
+                    buffer.clear()
+                }
+                context?.let { LifecycleLogger.log(it, "onMethodCall: clear_buffered_locations") }
+                result.success(0)
+            }
+            "get_buffered_location_count" -> {
+                val count = service?.getBufferedLocationCount() ?: run {
+                    val buffer = LocationBuffer(context!!)
+                    buffer.count()
+                }
+                context?.let { LifecycleLogger.log(it, "onMethodCall: get_buffered_location_count=$count") }
+                result.success(count)
+            }
+            
             else -> result.notImplemented()
         }
     }

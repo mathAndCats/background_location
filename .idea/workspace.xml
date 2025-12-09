@@ -6,6 +6,10 @@
   <component name="ChangeListManager">
     <list default="true" id="c12e51df-6686-4c5d-8db5-f1e5aa8826a4" name="Default Changelist" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/android/src/main/AndroidManifest.xml" beforeDir="false" afterPath="$PROJECT_DIR$/android/src/main/AndroidManifest.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/android/src/main/kotlin/com/almoullim/background_location/BackgroundLocationService.kt" beforeDir="false" afterPath="$PROJECT_DIR$/android/src/main/kotlin/com/almoullim/background_location/BackgroundLocationService.kt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/android/src/main/kotlin/com/almoullim/background_location/LocationUpdatesService.kt" beforeDir="false" afterPath="$PROJECT_DIR$/android/src/main/kotlin/com/almoullim/background_location/LocationUpdatesService.kt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/background_location.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/background_location.dart" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -17,6 +21,9 @@
   </component>
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="HighlightingSettingsPerFile">
+    <setting file="file://$USER_HOME$/Library/Caches/Google/AndroidStudio2024.2/device-explorer/Google Pixel 8/_/data/data/com.naturexplorer.mapapp/files/oetx_log_android_2025-12-06_10-49.txt" root0="SKIP_INSPECTION" />
   </component>
   <component name="MarkdownSettingsMigration">
     <option name="stateVersion" value="1" />

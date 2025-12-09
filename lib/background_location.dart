@@ -24,9 +24,14 @@ class BackgroundLocation {
   }
 
   /// Start receiving location updated
-  static Future<dynamic> startLocationService({double distanceFilter = 0.0, bool forceAndroidLocationManager = false}) async {
-    return await _channel.invokeMethod('start_location_service',
-        <String, dynamic>{'distance_filter': distanceFilter, 'force_location_manager': forceAndroidLocationManager});
+  static Future<dynamic> startLocationService(
+      {double distanceFilter = 0.0,
+      bool forceAndroidLocationManager = false}) async {
+    return await _channel
+        .invokeMethod('start_location_service', <String, dynamic>{
+      'distance_filter': distanceFilter,
+      'force_location_manager': forceAndroidLocationManager
+    });
   }
 
   static Future<dynamic> setAndroidNotification(
@@ -43,6 +48,16 @@ class BackgroundLocation {
         'interval': interval.toString(),
       });
     }
+  }
+
+  static Future<List<Location>> getBufferedLocations() async {
+    final List<dynamic> result =
+        await _channel.invokeMethod('get_buffered_locations');
+    return result.map((map) => Location.fromMap(map)).toList();
+  }
+
+  static Future<void> clearBufferedLocations() async {
+    await _channel.invokeMethod('clear_buffered_locations');
   }
 
   /// Get the current location once.
@@ -66,35 +81,33 @@ class BackgroundLocation {
     return completer.future;
   }
 
-
-
   /// Register a function to recive location updates as long as the location
   /// service has started
-  static void getLocationUpdates(Function(Location) location) {
-    // add a handler on the channel to recive updates from the native classes
+  static void getLocationUpdates(Function(Location) locationCallback) {
+    // add a handler on the channel to receive updates from the native classes
     _channel.setMethodCallHandler((MethodCall methodCall) async {
       if (methodCall.method == 'location') {
-        var locationData = Map.from(methodCall.arguments);
-        // Call the user passed function
         try {
-          location(
-          Location(
-              latitude: locationData['latitude'],
-              longitude: locationData['longitude'],
-              altitude: locationData['altitude'],
-              accuracy: locationData['accuracy'],
-              bearing: locationData['bearing'],
-              speed: locationData['speed'],
-              time: locationData['time'],
-              isMock: locationData['is_mock']),
-        );
-        }
-        catch(e) {
+          locationCallback(Location.fromMap(methodCall.arguments));
+        } catch (e) {
           //print(e.toString());
         }
-          
+      } else if (methodCall.method == 'buffered_locations') {
+        try {
+          final List<dynamic> locationsData = methodCall.arguments;
+          for (final map in locationsData) {
+            locationCallback(Location.fromMap(map));
+          }
+        } catch (e) {
+          //print(e.toString());
+        }
       }
     });
+  }
+
+  static Future<void> setRecordingState(bool isRecording) async {
+    await _channel
+        .invokeMethod('set_recording_state', {'is_recording': isRecording});
   }
 }
 
@@ -109,18 +122,32 @@ class Location {
   double? time;
   bool? isMock;
 
-  Location(
-      {@required this.longitude,
-      @required this.latitude,
-      @required this.altitude,
-      @required this.accuracy,
-      @required this.bearing,
-      @required this.speed,
-      @required this.time,
-      @required this.isMock});
+  Location({
+    @required this.longitude,
+    @required this.latitude,
+    @required this.altitude,
+    @required this.accuracy,
+    @required this.bearing,
+    @required this.speed,
+    @required this.time,
+    @required this.isMock,
+  });
+
+  factory Location.fromMap(Map<dynamic, dynamic> map) {
+    return Location(
+      latitude: map['latitude'],
+      longitude: map['longitude'],
+      altitude: map['altitude'],
+      accuracy: map['accuracy'],
+      bearing: map['bearing'],
+      speed: map['speed'],
+      time: map['time'],
+      isMock: map['is_mock'],
+    );
+  }
 
   Map<String, dynamic> toMap() {
-    var obj = {
+    return {
       'latitude': latitude,
       'longitude': longitude,
       'altitude': altitude,
@@ -128,8 +155,7 @@ class Location {
       'accuracy': accuracy,
       'speed': speed,
       'time': time,
-      'is_mock': isMock
+      'is_mock': isMock,
     };
-    return obj;
   }
 }

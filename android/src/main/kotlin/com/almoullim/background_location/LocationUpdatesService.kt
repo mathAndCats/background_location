@@ -259,12 +259,14 @@ class LocationUpdatesService : Service() {
     fun requestLocationUpdates() {
         Utils.setRequestingLocationUpdates(this, true)
         try {
-            mFusedLocationClient!!.removeLocationUpdates(mFusedLocationCallback!!)
-            if (isGoogleApiAvailable && !this.forceLocationManager) {
-                mFusedLocationClient!!.requestLocationUpdates(mLocationRequest!!,
+            if (isGoogleApiAvailable && !forceLocationManager) {
+                mFusedLocationClient?.removeLocationUpdates(mFusedLocationCallback!!)
+                mFusedLocationClient?.requestLocationUpdates(mLocationRequest!!,
                     mFusedLocationCallback!!, Looper.myLooper())
             } else {
-                mLocationManager?.requestLocationUpdates(LocationManager.GPS_PROVIDER, 0L, 0f, mLocationManagerCallback!!)
+                mLocationManager?.removeUpdates(mLocationManagerCallback!!)
+                mLocationManager?.requestLocationUpdates(
+                    LocationManager.GPS_PROVIDER, 0L, 0f, mLocationManagerCallback!!)
             }
         } catch (unlikely: SecurityException) {
             Utils.setRequestingLocationUpdates(this, false)
@@ -302,7 +304,11 @@ class LocationUpdatesService : Service() {
     }
 
     fun removeLocationUpdates() {
-        mFusedLocationClient!!.removeLocationUpdates(mFusedLocationCallback!!)
+        if (isGoogleApiAvailable && !forceLocationManager) {
+            mFusedLocationClient?.removeLocationUpdates(mFusedLocationCallback!!)
+        } else {
+            mLocationManager?.removeUpdates(mLocationManagerCallback!!)
+        }
         stopForeground(true)
         stopSelf()
     }
@@ -351,15 +357,32 @@ class LocationUpdatesService : Service() {
             }
 
             Utils.setRequestingLocationUpdates(this, false)
-            mNotificationManager!!.cancel(NOTIFICATION_ID)
+            mNotificationManager?.cancel(NOTIFICATION_ID)
         } catch (unlikely: SecurityException) {
             Utils.setRequestingLocationUpdates(this, true)
         }
+        locationBuffer?.close()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         LifecycleLogger.log(this, "onStartCommand called, isRecording=${isRecording()}")
-        return START_STICKY  // Tells Android to restart if killed
+
+        // Handle restart case - intent may be null if restarted by system
+        val distanceFilter = intent?.getDoubleExtra("distance_filter", 0.0) ?: 0.0
+        forceLocationManager = intent?.getBooleanExtra("force_location_manager", false) ?: false
+
+        // Make sure location request exists
+        if (mLocationRequest == null) {
+            createLocationRequest(distanceFilter)
+        }
+
+        // Resume location updates if we were recording
+        if (isRecording()) {
+            LifecycleLogger.log(this, "onStartCommand: Resuming location updates")
+            requestLocationUpdates()
+        }
+
+        return START_STICKY
     }
 
     private fun getMainActivityClass(context: Context): Class<*>? {

@@ -8,21 +8,30 @@ import android.content.ContentValues
 import android.location.Location
 
 class LocationBuffer(context: Context) : SQLiteOpenHelper(context, "location_buffer.db", null, 1) {
-    
+
+    private val database: SQLiteDatabase
+        get() {
+            if (_database == null || !_database!!.isOpen) {
+                _database = writableDatabase
+            }
+            return _database!!
+        }
+c
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("""
-            CREATE TABLE locations (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                latitude REAL NOT NULL,
-                longitude REAL NOT NULL,
-                altitude REAL NOT NULL,
-                accuracy REAL NOT NULL,
-                bearing REAL NOT NULL,
-                speed REAL NOT NULL,
-                time REAL NOT NULL,
-                is_mock INTEGER NOT NULL
-            )
-        """)
+        CREATE TABLE locations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            latitude REAL NOT NULL,
+            longitude REAL NOT NULL,
+            altitude REAL NOT NULL,
+            accuracy REAL NOT NULL,
+            bearing REAL NOT NULL,
+            speed REAL NOT NULL,
+            time REAL NOT NULL,
+            is_mock INTEGER NOT NULL
+        )
+    """)
+        db.execSQL("CREATE INDEX idx_locations_time ON locations(time)")
     }
     
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -41,7 +50,7 @@ class LocationBuffer(context: Context) : SQLiteOpenHelper(context, "location_buf
             put("time", location.time.toDouble())
             put("is_mock", if (location.isFromMockProvider) 1 else 0)
         }
-        writableDatabase.insert("locations", null, values)
+        _database.insert("locations", null, values)
     }
     
     fun getAll(): List<Map<String, Any>> {
@@ -66,7 +75,7 @@ class LocationBuffer(context: Context) : SQLiteOpenHelper(context, "location_buf
     }
     
     fun clear() {
-        writableDatabase.delete("locations", null, null)
+        _database.delete("locations", null, null)
     }
     
     fun count(): Int {
@@ -75,5 +84,11 @@ class LocationBuffer(context: Context) : SQLiteOpenHelper(context, "location_buf
             it.moveToFirst()
             return it.getInt(0)
         }
+    }
+
+    override fun close() {
+        _database?.close()
+        _database = null
+        super.close()
     }
 }

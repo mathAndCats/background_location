@@ -113,6 +113,18 @@ class BackgroundLocationService: MethodChannel.MethodCallHandler, PluginRegistry
 
     fun onDetachedFromEngine() {
         context?.let { LifecycleLogger.log(it, "onDetachedFromEngine: Detaching - bound=$bound") }
+
+        // Unregister the receiver
+        try {
+            receiver?.let {
+                context?.let { ctx ->
+                    LocalBroadcastManager.getInstance(ctx).unregisterReceiver(it)
+                }
+            }
+        } catch (e: IllegalArgumentException) {
+            // Already unregistered
+        }
+
         channel.setMethodCallHandler(null)
         context = null
         isAttached = false
@@ -129,7 +141,7 @@ class BackgroundLocationService: MethodChannel.MethodCallHandler, PluginRegistry
                 Log.d(BackgroundLocationPlugin.TAG, "Activity attached, rebinding to existing service")
                 context?.let { LifecycleLogger.log(it, "setActivity: Rebinding to existing service") }
                 rebindToExistingService()
-            } else if (Utils.requestingLocationUpdates(context!!)) {
+            } else if (context != null && Utils.requestingLocationUpdates(context!!)) {
                 if (!checkPermissions()) {
                     context?.let { LifecycleLogger.log(it, "setActivity: Requesting permissions") }
                     requestPermissions()
@@ -172,23 +184,24 @@ class BackgroundLocationService: MethodChannel.MethodCallHandler, PluginRegistry
     }
 
     private fun reallyStartLocationService() {
-        context?.let { LifecycleLogger.log(it, "reallyStartLocationService: Starting service with distanceFilter=$distanceFilter, bound=$bound") }
-        LocalBroadcastManager.getInstance(context!!).registerReceiver(receiver!!,
-            IntentFilter(LocationUpdatesService.ACTION_BROADCAST))
+        val ctx = context ?: return
+        LifecycleLogger.log(ctx, "reallyStartLocationService: Starting service with distanceFilter=$distanceFilter, bound=$bound")
+
+        /*receiver?.let {
+            LocalBroadcastManager.getInstance(ctx).registerReceiver(it,
+                IntentFilter(LocationUpdatesService.ACTION_BROADCAST))
+        } */
+
         if (!bound) {
-            val intent = Intent(context, LocationUpdatesService::class.java)
+            val intent = Intent(ctx, LocationUpdatesService::class.java)
             intent.putExtra("distance_filter", this.distanceFilter)
             intent.putExtra("force_location_manager", false)
-            
-            // Start as foreground service first - this triggers onStartCommand
-            ContextCompat.startForegroundService(context!!, intent)
-            context?.let { LifecycleLogger.log(it, "reallyStartLocationService: startForegroundService called") }
-            
-            // Then bind to it
-            context!!.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
-            context?.let { LifecycleLogger.log(it, "reallyStartLocationService: bindService called") }
-        } else {
-            context?.let { LifecycleLogger.log(it, "reallyStartLocationService: Already bound, skipping bindService") }
+
+            ContextCompat.startForegroundService(ctx, intent)
+            LifecycleLogger.log(ctx, "reallyStartLocationService: startForegroundService called")
+
+            ctx.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
+            LifecycleLogger.log(ctx, "reallyStartLocationService: bindService called")
         }
     }
 
@@ -199,7 +212,8 @@ class BackgroundLocationService: MethodChannel.MethodCallHandler, PluginRegistry
         }
         
         // Fallback to ActivityManager check
-        val manager = context!!.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        val ctx = context ?: return false
+        val manager = ctx.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
         @Suppress("DEPRECATION")
         for (serviceInfo in manager.getRunningServices(Integer.MAX_VALUE)) {
             if (LocationUpdatesService::class.java.name == serviceInfo.service.className) {
@@ -213,7 +227,6 @@ class BackgroundLocationService: MethodChannel.MethodCallHandler, PluginRegistry
         context?.let { LifecycleLogger.log(it, "stopLocationService: Stopping service, bound=$bound") }
 
         service?.removeLocationUpdates()
-        LocalBroadcastManager.getInstance(context!!).unregisterReceiver(receiver!!)
 
         if (bound) {
             context!!.unbindService(serviceConnection)
@@ -332,7 +345,8 @@ class BackgroundLocationService: MethodChannel.MethodCallHandler, PluginRegistry
      * Checks the current permission for `ACCESS_FINE_LOCATION`
      */
     private fun checkPermissions(): Boolean {
-        return PackageManager.PERMISSION_GRANTED == ActivityCompat.checkSelfPermission(context!!, Manifest.permission.ACCESS_FINE_LOCATION)
+        val ctx = context ?: return false
+        return PackageManager.PERMISSION_GRANTED == ActivityCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION)
     }
 
 

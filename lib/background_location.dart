@@ -51,12 +51,14 @@ class BackgroundLocation {
   }
 
   static Future<List<Location>> getBufferedLocations() async {
+    if (!Platform.isAndroid) return [];
     final List<dynamic> result =
         await _channel.invokeMethod('get_buffered_locations');
     return result.map((map) => Location.fromMap(map)).toList();
   }
 
   static Future<void> clearBufferedLocations() async {
+    if (!Platform.isAndroid) return;
     await _channel.invokeMethod('clear_buffered_locations');
   }
 
@@ -106,6 +108,7 @@ class BackgroundLocation {
   }
 
   static Future<void> setRecordingState(bool isRecording) async {
+    if (!Platform.isAndroid) return;
     await _channel
         .invokeMethod('set_recording_state', {'is_recording': isRecording});
   }

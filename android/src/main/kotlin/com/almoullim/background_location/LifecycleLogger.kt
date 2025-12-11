@@ -8,6 +8,8 @@ import java.util.*
 
 object LifecycleLogger {
 
+    var enabled: Boolean = false
+
     private fun getLogFile(context: Context): File? {
         try {
             // Use the same directory as Flutter's getApplicationDocumentsDirectory()
@@ -33,6 +35,8 @@ object LifecycleLogger {
     }
 
     fun log(context: Context, message: String) {
+        if (!enabled) return
+
         try {
             val file = getLogFile(context) ?: return
             val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())

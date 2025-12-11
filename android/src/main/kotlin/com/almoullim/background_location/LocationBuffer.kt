@@ -9,6 +9,8 @@ import android.location.Location
 
 class LocationBuffer(context: Context) : SQLiteOpenHelper(context, "location_buffer.db", null, 1) {
 
+    private var _database: SQLiteDatabase? = null
+
     private val database: SQLiteDatabase
         get() {
             if (_database == null || !_database!!.isOpen) {
@@ -16,29 +18,28 @@ class LocationBuffer(context: Context) : SQLiteOpenHelper(context, "location_buf
             }
             return _database!!
         }
-c
+
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("""
-        CREATE TABLE locations (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            latitude REAL NOT NULL,
-            longitude REAL NOT NULL,
-            altitude REAL NOT NULL,
-            accuracy REAL NOT NULL,
-            bearing REAL NOT NULL,
-            speed REAL NOT NULL,
-            time REAL NOT NULL,
-            is_mock INTEGER NOT NULL
-        )
-    """)
-        db.execSQL("CREATE INDEX idx_locations_time ON locations(time)")
+            CREATE TABLE locations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                latitude REAL NOT NULL,
+                longitude REAL NOT NULL,
+                altitude REAL NOT NULL,
+                accuracy REAL NOT NULL,
+                bearing REAL NOT NULL,
+                speed REAL NOT NULL,
+                time REAL NOT NULL,
+                is_mock INTEGER NOT NULL
+            )
+        """)
     }
-    
+
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         db.execSQL("DROP TABLE IF EXISTS locations")
         onCreate(db)
     }
-    
+
     fun insert(location: Location) {
         val values = ContentValues().apply {
             put("latitude", location.latitude)
@@ -50,13 +51,13 @@ c
             put("time", location.time.toDouble())
             put("is_mock", if (location.isFromMockProvider) 1 else 0)
         }
-        _database.insert("locations", null, values)
+        database.insert("locations", null, values)
     }
-    
+
     fun getAll(): List<Map<String, Any>> {
         val locations = mutableListOf<Map<String, Any>>()
         val cursor = readableDatabase.rawQuery("SELECT * FROM locations ORDER BY time ASC", null)
-        
+
         cursor.use {
             while (it.moveToNext()) {
                 locations.add(mapOf(
@@ -73,11 +74,11 @@ c
         }
         return locations
     }
-    
+
     fun clear() {
-        _database.delete("locations", null, null)
+        database.delete("locations", null, null)
     }
-    
+
     fun count(): Int {
         val cursor = readableDatabase.rawQuery("SELECT COUNT(*) FROM locations", null)
         cursor.use {

@@ -20,6 +20,7 @@ import com.google.android.gms.common.*
 class LocationUpdatesService : Service() {
 
     private var forceLocationManager: Boolean = false
+    private var locationBuffer: LocationBuffer? = null 
 
     override fun onBind(intent: Intent?): IBinder {
         val distanceFilter = intent?.getDoubleExtra("distance_filter", 0.0)
@@ -60,10 +61,36 @@ class LocationUpdatesService : Service() {
         var FASTEST_UPDATE_INTERVAL_IN_MILLISECONDS = UPDATE_INTERVAL_IN_MILLISECONDS / 2
         private const val NOTIFICATION_ID = 12345678
         private lateinit var broadcastReceiver: BroadcastReceiver
-
         private const val STOP_SERVICE = "stop_service"
+
+        // NEW: Add these for persisted recording state
+        private const val PREFS_NAME = "location_service_prefs"
+        private const val KEY_IS_RECORDING = "is_recording"
+        
+        fun setRecordingState(context: Context, isRecording: Boolean) {
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean(KEY_IS_RECORDING, isRecording)
+                .apply()
+        }
+        
+        fun getRecordingState(context: Context): Boolean {
+            return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(KEY_IS_RECORDING, false)
+        }
     }
 
+    fun setRecording(isRecording: Boolean) {
+        setRecordingState(this, isRecording)
+        if (isRecording) {
+            lastBufferedLocation = null
+            lastBufferedTime = 0
+        }
+    }
+
+    private fun isRecording(): Boolean {
+        return getRecordingState(this)
+    }
 
     private val notification: NotificationCompat.Builder
         @SuppressLint("UnspecifiedImmutableFlag")
@@ -100,6 +127,8 @@ class LocationUpdatesService : Service() {
     private var mServiceHandler: Handler? = null
 
     override fun onCreate() {
+        locationBuffer = LocationBuffer(this)
+
         val googleAPIAvailability = GoogleApiAvailability.getInstance()
             .isGooglePlayServicesAvailable(applicationContext)
         
@@ -162,16 +191,82 @@ class LocationUpdatesService : Service() {
         updateNotification() // to start the foreground service
     }
 
+    private var lastBufferedLocation: Location? = null
+    private var lastBufferedTime: Long = 0
+
+    private fun onNewLocation(location: Location) {
+        try {
+            LifecycleLogger.log(this, "LocationUpdatesService - received location $location")
+            mLocation = location
+
+            val recording = isRecording()
+            LifecycleLogger.log(this, "LocationUpdatesService - isRecording=$recording")
+
+            if (recording) {
+                val shouldBuf = shouldBuffer(location)
+                LifecycleLogger.log(this, "LocationUpdatesService - shouldBuffer=$shouldBuf")
+
+                if (shouldBuf) {
+                    locationBuffer?.insert(location)
+                    lastBufferedLocation = location
+                    lastBufferedTime = location.time
+                    LifecycleLogger.log(this, "LocationUpdatesService - buffered location, count=${locationBuffer?.count()}")
+                } else {
+                    LifecycleLogger.log(this, "LocationUpdatesService - skipped buffering")
+                }
+            }
+
+            val intent = Intent(ACTION_BROADCAST)
+            intent.putExtra(EXTRA_LOCATION, location)
+            LocalBroadcastManager.getInstance(applicationContext).sendBroadcast(intent)
+        } catch (e: Exception) {
+            LifecycleLogger.log(this, "LocationUpdatesService - ERROR in onNewLocation: ${e.message}")
+            e.printStackTrace()
+        }
+    }
+
+    private fun shouldBuffer(location: Location): Boolean {
+        val last = lastBufferedLocation
+        if (last == null) {
+            LifecycleLogger.log(this, "shouldBuffer - no last location, returning true")
+            return true
+        }
+
+        val timeDelta = location.time - lastBufferedTime
+        val distance = last.distanceTo(location)
+        LifecycleLogger.log(this, "shouldBuffer - timeDelta=${timeDelta}ms, distance=${distance}m")
+
+        if (distance < 3f || timeDelta < 10000) {
+            LifecycleLogger.log(this, "shouldBuffer - returning false (too close)")
+            return false
+        }
+
+        return true
+    }
+    
+    fun getBufferedLocations(): List<Map<String, Any>> {
+        return locationBuffer?.getAll() ?: emptyList()
+    }
+    
+    fun clearBufferedLocations() {
+        locationBuffer?.clear()
+    }
+    
+    fun getBufferedLocationCount(): Int {
+        return locationBuffer?.count() ?: 0
+    }
 
     fun requestLocationUpdates() {
         Utils.setRequestingLocationUpdates(this, true)
         try {
-            mFusedLocationClient!!.removeLocationUpdates(mFusedLocationCallback!!)
-            if (isGoogleApiAvailable && !this.forceLocationManager) {
-                mFusedLocationClient!!.requestLocationUpdates(mLocationRequest!!,
+            if (isGoogleApiAvailable && !forceLocationManager) {
+                mFusedLocationClient?.removeLocationUpdates(mFusedLocationCallback!!)
+                mFusedLocationClient?.requestLocationUpdates(mLocationRequest!!,
                     mFusedLocationCallback!!, Looper.myLooper())
             } else {
-                mLocationManager?.requestLocationUpdates(LocationManager.GPS_PROVIDER, 0L, 0f, mLocationManagerCallback!!)
+                mLocationManager?.removeUpdates(mLocationManagerCallback!!)
+                mLocationManager?.requestLocationUpdates(
+                    LocationManager.GPS_PROVIDER, 0L, 0f, mLocationManagerCallback!!)
             }
         } catch (unlikely: SecurityException) {
             Utils.setRequestingLocationUpdates(this, false)
@@ -209,7 +304,11 @@ class LocationUpdatesService : Service() {
     }
 
     fun removeLocationUpdates() {
-        mFusedLocationClient!!.removeLocationUpdates(mFusedLocationCallback!!)
+        if (isGoogleApiAvailable && !forceLocationManager) {
+            mFusedLocationClient?.removeLocationUpdates(mFusedLocationCallback!!)
+        } else {
+            mLocationManager?.removeUpdates(mLocationManagerCallback!!)
+        }
         stopForeground(true)
         stopSelf()
     }
@@ -230,14 +329,6 @@ class LocationUpdatesService : Service() {
         } catch (unlikely: SecurityException) {
         }
     }
-
-    private fun onNewLocation(location: Location) {
-        mLocation = location
-        val intent = Intent(ACTION_BROADCAST)
-        intent.putExtra(EXTRA_LOCATION, location)
-        LocalBroadcastManager.getInstance(applicationContext).sendBroadcast(intent)
-    }
-
 
     fun createLocationRequest(distanceFilter: Double) {
         mLocationRequest = LocationRequest()
@@ -266,10 +357,32 @@ class LocationUpdatesService : Service() {
             }
 
             Utils.setRequestingLocationUpdates(this, false)
-            mNotificationManager!!.cancel(NOTIFICATION_ID)
+            mNotificationManager?.cancel(NOTIFICATION_ID)
         } catch (unlikely: SecurityException) {
             Utils.setRequestingLocationUpdates(this, true)
         }
+        locationBuffer?.close()
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        LifecycleLogger.log(this, "onStartCommand called, isRecording=${isRecording()}")
+
+        // Handle restart case - intent may be null if restarted by system
+        val distanceFilter = intent?.getDoubleExtra("distance_filter", 0.0) ?: 0.0
+        forceLocationManager = intent?.getBooleanExtra("force_location_manager", false) ?: false
+
+        // Make sure location request exists
+        if (mLocationRequest == null) {
+            createLocationRequest(distanceFilter)
+        }
+
+        // Resume location updates if we were recording
+        if (isRecording()) {
+            LifecycleLogger.log(this, "onStartCommand: Resuming location updates")
+            requestLocationUpdates()
+        }
+
+        return START_STICKY
     }
 
     private fun getMainActivityClass(context: Context): Class<*>? {

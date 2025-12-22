@@ -53,7 +53,7 @@ class LocationUpdatesService : Service() {
 
         private const val PACKAGE_NAME = "com.google.android.gms.location.sample.locationupdatesforegroundservice"
         private val TAG = LocationUpdatesService::class.java.simpleName
-        private const val CHANNEL_ID = "channel_01"
+        private const val CHANNEL_ID = "BackgroundLocation"
         internal const val ACTION_BROADCAST = "$PACKAGE_NAME.broadcast"
         internal const val EXTRA_LOCATION = "$PACKAGE_NAME.location"
         private const val EXTRA_STARTED_FROM_NOTIFICATION = "$PACKAGE_NAME.started_from_notification"
@@ -95,6 +95,10 @@ class LocationUpdatesService : Service() {
     private val notification: NotificationCompat.Builder
         @SuppressLint("UnspecifiedImmutableFlag")
         get() {
+
+            LifecycleLogger.log(this, "notification getter: NOTIFICATION_TITLE=$NOTIFICATION_TITLE")
+            LifecycleLogger.log(this, "notification getter: NOTIFICATION_MESSAGE=$NOTIFICATION_MESSAGE")
+            LifecycleLogger.log(this, "notification getter: CHANNEL_ID=$CHANNEL_ID")
 
             val intent = Intent(this, getMainActivityClass(this))
             intent.putExtra(EXTRA_STARTED_FROM_NOTIFICATION, true)
@@ -274,8 +278,13 @@ class LocationUpdatesService : Service() {
     }
 
     fun updateNotification() {
+
+        LifecycleLogger.log(this, "updateNotification: isStarted=$isStarted")
+
         if (!isStarted) {
             isStarted = true
+            LifecycleLogger.log(this, "updateNotification: calling startForeground with NOTIFICATION_ID=$NOTIFICATION_ID")
+
 
             if (isAppInForeground(applicationContext)) {
                 if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -284,6 +293,8 @@ class LocationUpdatesService : Service() {
                     startForeground(NOTIFICATION_ID, notification.build())
                 }
             }
+
+            LifecycleLogger.log(this, "updateNotification: startForeground called")
 
         } else {
             val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager

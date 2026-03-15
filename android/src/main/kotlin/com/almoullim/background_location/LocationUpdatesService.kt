@@ -116,7 +116,7 @@ class LocationUpdatesService : Service() {
                     .setOngoing(true)
                     .setSound(null)
                     .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-                    .setSmallIcon(resources.getIdentifier(NOTIFICATION_ICON, "mipmap", packageName))
+                    .setSmallIcon(resources.getIdentifier(NOTIFICATION_ICON, "drawable", packageName))
                     .setWhen(System.currentTimeMillis())
                     .setStyle(NotificationCompat.BigTextStyle().bigText(NOTIFICATION_MESSAGE))
                     .setContentIntent(pendingIntent)

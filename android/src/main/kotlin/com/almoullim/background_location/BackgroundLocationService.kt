@@ -11,7 +11,6 @@ import android.content.pm.PackageManager
 import android.location.Location
 import android.os.IBinder
 import android.util.Log
-import android.widget.Toast
 import androidx.annotation.NonNull
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -19,13 +18,11 @@ import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 
 import io.flutter.plugin.common.MethodCall
-import io.flutter.plugin.common.PluginRegistry
 
 
-class BackgroundLocationService: MethodChannel.MethodCallHandler, PluginRegistry.RequestPermissionsResultListener {
+class BackgroundLocationService: MethodChannel.MethodCallHandler {
     companion object {
         const val METHOD_CHANNEL_NAME = "${BackgroundLocationPlugin.PLUGIN_ID}/methods"
-        private const val REQUEST_PERMISSIONS_REQUEST_CODE = 34
 
         private var instance: BackgroundLocationService? = null
 
@@ -141,11 +138,6 @@ class BackgroundLocationService: MethodChannel.MethodCallHandler, PluginRegistry
                 Log.d(BackgroundLocationPlugin.TAG, "Activity attached, rebinding to existing service")
                 context?.let { LifecycleLogger.log(it, "setActivity: Rebinding to existing service") }
                 rebindToExistingService()
-            } else if (context != null && Utils.requestingLocationUpdates(context!!)) {
-                if (!checkPermissions()) {
-                    context?.let { LifecycleLogger.log(it, "setActivity: Requesting permissions") }
-                    requestPermissions()
-                }
             }
         } else {
             // Activity is null - this is FINE for a foreground service
@@ -174,12 +166,12 @@ class BackgroundLocationService: MethodChannel.MethodCallHandler, PluginRegistry
         }
 
         if (!checkPermissions()) {
-            context?.let { LifecycleLogger.log(it, "startLocationService: Permissions not granted, requesting") }
-            requestPermissions()
-        } else {
-            context?.let { LifecycleLogger.log(it, "startLocationService: Permissions granted, starting service") }
-            reallyStartLocationService()
+            context?.let { LifecycleLogger.log(it, "startLocationService: Permissions not granted; Dart is responsible for requesting") }
+            return 0
         }
+
+        context?.let { LifecycleLogger.log(it, "startLocationService: Permissions granted, starting service") }
+        reallyStartLocationService()
         return 0
     }
 
@@ -327,52 +319,25 @@ class BackgroundLocationService: MethodChannel.MethodCallHandler, PluginRegistry
     }
 
     /**
-     * Requests a location updated.
-     * If permission is denied, it requests the needed permission
+     * Requests a location update. Caller (Dart) is responsible for ensuring
+     * permission is granted before this is reached — if it's not, we fail
+     * gracefully without trying to prompt the user.
      */
     private fun requestLocation() {
         context?.let { LifecycleLogger.log(it, "requestLocation: checkPermissions=${checkPermissions()}") }
 
         if (!checkPermissions()) {
-            requestPermissions()
-        } else {
-            context?.let { LifecycleLogger.log(it, "requestLocation: Requesting location updates from service") }
-            service?.requestLocationUpdates()
+            return
         }
+        service?.requestLocationUpdates()
     }
 
     /**
-     * Checks the current permission for `ACCESS_FINE_LOCATION`
+     * Checks the current permission for `ACCESS_FINE_LOCATION`.
      */
     private fun checkPermissions(): Boolean {
         val ctx = context ?: return false
         return PackageManager.PERMISSION_GRANTED == ActivityCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION)
-    }
-
-
-    /**
-     * Requests permission for location.
-     * Depending on the current activity, displays a rationale for the request.
-     */
-    private fun requestPermissions() {
-        context?.let { LifecycleLogger.log(it, "requestPermissions: activity=${activity != null}") }
-
-        if(activity == null) {
-            context?.let { LifecycleLogger.log(it, "requestPermissions: Activity is null, cannot request permissions") }
-            return
-        }
-
-        val shouldProvideRationale = ActivityCompat.shouldShowRequestPermissionRationale(activity!!, Manifest.permission.ACCESS_FINE_LOCATION)
-        if (shouldProvideRationale) {
-            context?.let { LifecycleLogger.log(it, "requestPermissions: Showing rationale to user") }
-            Toast.makeText(context, R.string.permission_rationale, Toast.LENGTH_LONG).show()
-
-        } else {
-            context?.let { LifecycleLogger.log(it, "requestPermissions: Requesting ACCESS_FINE_LOCATION permission") }
-            ActivityCompat.requestPermissions(activity!!,
-                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION),
-                REQUEST_PERMISSIONS_REQUEST_CODE)
-        }
     }
 
     private inner class MyReceiver : BroadcastReceiver() {
@@ -397,29 +362,4 @@ class BackgroundLocationService: MethodChannel.MethodCallHandler, PluginRegistry
         }
     }
 
-    /**
-     * Handle the response from a permission request
-     * @return true if the result has been handled.
-     */
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray): Boolean{
-        context?.let { LifecycleLogger.log(it, "onRequestPermissionsResult: requestCode=$requestCode, grantResults=${grantResults.contentToString()}") }
-
-        if (requestCode == REQUEST_PERMISSIONS_REQUEST_CODE) {
-            when {
-                grantResults!!.isEmpty() -> {
-                    Log.i(BackgroundLocationPlugin.TAG, "User interaction was cancelled.")
-                    context?.let { LifecycleLogger.log(it, "onRequestPermissionsResult: User interaction was cancelled") }
-                }
-                grantResults[0] == PackageManager.PERMISSION_GRANTED -> {
-                    context?.let { LifecycleLogger.log(it, "onRequestPermissionsResult: Permission granted, starting service") }
-                    reallyStartLocationService()
-                }
-                else -> {
-                    context?.let { LifecycleLogger.log(it, "onRequestPermissionsResult: Permission denied") }
-                    Toast.makeText(context, R.string.permission_denied_explanation, Toast.LENGTH_LONG).show()
-                }
-            }
-        }
-        return true
-    }
 }

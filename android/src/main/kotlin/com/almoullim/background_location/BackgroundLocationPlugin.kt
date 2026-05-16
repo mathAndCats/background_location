@@ -26,7 +26,6 @@ class BackgroundLocationPlugin : FlutterPlugin, ActivityAware {
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
         val service = BackgroundLocationService.getInstance()
         service.setActivity(binding)
-        binding.addRequestPermissionsResultListener(service)
     }
 
     override fun onDetachedFromActivityForConfigChanges() {

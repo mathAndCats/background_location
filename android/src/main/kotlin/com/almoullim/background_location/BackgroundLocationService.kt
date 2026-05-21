@@ -10,7 +10,6 @@ import android.content.*
 import android.content.pm.PackageManager
 import android.location.Location
 import android.os.IBinder
-import android.util.Log
 import androidx.annotation.NonNull
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -135,7 +134,6 @@ class BackgroundLocationService: MethodChannel.MethodCallHandler {
             context?.let { LifecycleLogger.log(it, "setActivity: Activity attached, isServiceRunning=${isLocationServiceRunning()}") }
             // Rebind if service is running
             if (isLocationServiceRunning() && !bound) {
-                Log.d(BackgroundLocationPlugin.TAG, "Activity attached, rebinding to existing service")
                 context?.let { LifecycleLogger.log(it, "setActivity: Rebinding to existing service") }
                 rebindToExistingService()
             }
@@ -157,7 +155,6 @@ class BackgroundLocationService: MethodChannel.MethodCallHandler {
 
         // NEW: If already running, just rebind instead of starting new
         if (isLocationServiceRunning()) {
-            Log.d(BackgroundLocationPlugin.TAG, "Service already running, rebinding instead of starting")
             context?.let { LifecycleLogger.log(it, "startLocationService: Service already running, rebinding instead of starting") }
             if (!bound) {
                 rebindToExistingService()

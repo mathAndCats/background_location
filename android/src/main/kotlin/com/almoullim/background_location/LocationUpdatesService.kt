@@ -157,7 +157,6 @@ class LocationUpdatesService : Service() {
             mLocationManager = getSystemService(LOCATION_SERVICE) as LocationManager?
 
             mLocationManagerCallback = LocationListener { location ->
-                println(location.toString())
                 onNewLocation(location)
             }
         }

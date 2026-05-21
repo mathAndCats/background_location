@@ -96,9 +96,6 @@ class LocationUpdatesService : Service() {
         @SuppressLint("UnspecifiedImmutableFlag")
         get() {
 
-            LifecycleLogger.log(this, "notification getter: NOTIFICATION_TITLE=$NOTIFICATION_TITLE")
-            LifecycleLogger.log(this, "notification getter: NOTIFICATION_MESSAGE=$NOTIFICATION_MESSAGE")
-            LifecycleLogger.log(this, "notification getter: CHANNEL_ID=$CHANNEL_ID")
 
             val intent = Intent(this, getMainActivityClass(this))
             intent.putExtra(EXTRA_STARTED_FROM_NOTIFICATION, true)
@@ -157,7 +154,6 @@ class LocationUpdatesService : Service() {
             mLocationManager = getSystemService(LOCATION_SERVICE) as LocationManager?
 
             mLocationManagerCallback = LocationListener { location ->
-                println(location.toString())
                 onNewLocation(location)
             }
         }
@@ -200,23 +196,18 @@ class LocationUpdatesService : Service() {
 
     private fun onNewLocation(location: Location) {
         try {
-            LifecycleLogger.log(this, "LocationUpdatesService - received location $location")
             mLocation = location
 
             val recording = isRecording()
-            LifecycleLogger.log(this, "LocationUpdatesService - isRecording=$recording")
 
             if (recording) {
                 val shouldBuf = shouldBuffer(location)
-                LifecycleLogger.log(this, "LocationUpdatesService - shouldBuffer=$shouldBuf")
 
                 if (shouldBuf) {
                     locationBuffer?.insert(location)
                     lastBufferedLocation = location
                     lastBufferedTime = location.time
-                    LifecycleLogger.log(this, "LocationUpdatesService - buffered location, count=${locationBuffer?.count()}")
                 } else {
-                    LifecycleLogger.log(this, "LocationUpdatesService - skipped buffering")
                 }
             }
 
@@ -224,7 +215,6 @@ class LocationUpdatesService : Service() {
             intent.putExtra(EXTRA_LOCATION, location)
             LocalBroadcastManager.getInstance(applicationContext).sendBroadcast(intent)
         } catch (e: Exception) {
-            LifecycleLogger.log(this, "LocationUpdatesService - ERROR in onNewLocation: ${e.message}")
             e.printStackTrace()
         }
     }
@@ -232,16 +222,13 @@ class LocationUpdatesService : Service() {
     private fun shouldBuffer(location: Location): Boolean {
         val last = lastBufferedLocation
         if (last == null) {
-            LifecycleLogger.log(this, "shouldBuffer - no last location, returning true")
             return true
         }
 
         val timeDelta = location.time - lastBufferedTime
         val distance = last.distanceTo(location)
-        LifecycleLogger.log(this, "shouldBuffer - timeDelta=${timeDelta}ms, distance=${distance}m")
 
         if (distance < 3f || timeDelta < 10000) {
-            LifecycleLogger.log(this, "shouldBuffer - returning false (too close)")
             return false
         }
 
@@ -279,11 +266,9 @@ class LocationUpdatesService : Service() {
 
     fun updateNotification() {
 
-        LifecycleLogger.log(this, "updateNotification: isStarted=$isStarted")
 
         if (!isStarted) {
             isStarted = true
-            LifecycleLogger.log(this, "updateNotification: calling startForeground with NOTIFICATION_ID=$NOTIFICATION_ID")
 
 
             if (isAppInForeground(applicationContext)) {
@@ -294,7 +279,6 @@ class LocationUpdatesService : Service() {
                 }
             }
 
-            LifecycleLogger.log(this, "updateNotification: startForeground called")
 
         } else {
             val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -376,7 +360,6 @@ class LocationUpdatesService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        LifecycleLogger.log(this, "onStartCommand called, isRecording=${isRecording()}")
 
         // Handle restart case - intent may be null if restarted by system
         val distanceFilter = intent?.getDoubleExtra("distance_filter", 0.0) ?: 0.0
@@ -389,7 +372,6 @@ class LocationUpdatesService : Service() {
 
         // Resume location updates if we were recording
         if (isRecording()) {
-            LifecycleLogger.log(this, "onStartCommand: Resuming location updates")
             requestLocationUpdates()
         }
 

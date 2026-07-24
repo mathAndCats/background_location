@@ -284,13 +284,19 @@ class LocationUpdatesService : Service() {
             isStarted = true
             LifecycleLogger.log(this, "updateNotification: calling startForeground with NOTIFICATION_ID=$NOTIFICATION_ID")
 
-
-            if (isAppInForeground(applicationContext)) {
-                if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    startForeground(NOTIFICATION_ID, notification.build(), ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
-                } else {
-                    startForeground(NOTIFICATION_ID, notification.build())
-                }
+            // ALWAYS promote — never gate this on isAppInForeground(). Once
+            // startForegroundService() has been called, Android requires startForeground()
+            // within ~5s or it kills us with ForegroundServiceDidNotStartInTimeException (an
+            // async RemoteServiceException that no try/catch can intercept). The
+            // background-start case is guarded at the START site (reallyStartLocationService),
+            // so reaching here means the promote is permitted. The old isAppInForeground()
+            // gate both CAUSED this crash and was unreliable — it false-negatives for
+            // genuinely-foreground apps because runningAppProcesses importance is racy and the
+            // check demanded an exact == IMPORTANCE_FOREGROUND.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                startForeground(NOTIFICATION_ID, notification.build(), ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+            } else {
+                startForeground(NOTIFICATION_ID, notification.build())
             }
 
             LifecycleLogger.log(this, "updateNotification: startForeground called")

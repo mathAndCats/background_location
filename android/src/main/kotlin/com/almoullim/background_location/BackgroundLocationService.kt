@@ -186,8 +186,20 @@ class BackgroundLocationService: MethodChannel.MethodCallHandler {
             intent.putExtra("distance_filter", this.distanceFilter)
             intent.putExtra("force_location_manager", false)
 
-            ContextCompat.startForegroundService(ctx, intent)
-            LifecycleLogger.log(ctx, "reallyStartLocationService: startForegroundService called")
+            try {
+                ContextCompat.startForegroundService(ctx, intent)
+                LifecycleLogger.log(ctx, "reallyStartLocationService: startForegroundService called")
+            } catch (e: IllegalStateException) {
+                // API 31+ ForegroundServiceStartNotAllowedException (a subclass of
+                // IllegalStateException): the OS refused to start a foreground service from
+                // the background. "Start tracking" is always a foreground user action, so
+                // this is an unexpected edge (e.g. the app backgrounding mid-start). Bail out
+                // WITHOUT binding — creating the service anyway would inherit the
+                // startForeground() obligation and then crash with the *uncatchable*
+                // ForegroundServiceDidNotStartInTimeException.
+                LifecycleLogger.log(ctx, "reallyStartLocationService: FGS start refused: ${e.message}")
+                return
+            }
 
             ctx.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
             LifecycleLogger.log(ctx, "reallyStartLocationService: bindService called")

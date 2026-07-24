@@ -131,6 +131,20 @@ class LocationUpdatesService : Service() {
     private var mServiceHandler: Handler? = null
 
     override fun onCreate() {
+        // Promote to the foreground FIRST — before any location / Play-services / DB setup.
+        // startForegroundService() (BackgroundLocationService.reallyStartLocationService) has
+        // already started Android's ~5s deadline to call startForeground(); doing it here as
+        // the very first thing keeps us well inside that window even when the main thread is
+        // busy (cold start, heavy UI). The channel must exist before the notification posts.
+        mNotificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val name = "Application Name"
+            val mChannel = NotificationChannel(CHANNEL_ID, name, NotificationManager.IMPORTANCE_DEFAULT)
+            mChannel.setSound(null, null)
+            mNotificationManager!!.createNotificationChannel(mChannel)
+        }
+        updateNotification() // startForeground() — satisfy the FGS obligation immediately
+
         locationBuffer = LocationBuffer(this)
 
         val googleAPIAvailability = GoogleApiAvailability.getInstance()
@@ -167,14 +181,6 @@ class LocationUpdatesService : Service() {
         handlerThread.start()
         mServiceHandler = Handler(handlerThread.looper)
 
-        mNotificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val name = "Application Name"
-            val mChannel = NotificationChannel(CHANNEL_ID, name, NotificationManager.IMPORTANCE_DEFAULT)
-            mChannel.setSound(null, null)
-            mNotificationManager!!.createNotificationChannel(mChannel)
-        }
-
         broadcastReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 if (intent?.action == "stop_service") {
@@ -190,8 +196,6 @@ class LocationUpdatesService : Service() {
         } else {
             registerReceiver(broadcastReceiver, filter)
         }
-
-        updateNotification() // to start the foreground service
     }
 
     private var lastBufferedLocation: Location? = null

@@ -245,6 +245,10 @@ class BackgroundLocationService: MethodChannel.MethodCallHandler {
         if (message != null) LocationUpdatesService.NOTIFICATION_MESSAGE = message
         if (icon != null) LocationUpdatesService.NOTIFICATION_ICON = icon
 
+        // Persist immediately: this call is the ONLY route the copy takes into the service,
+        // and a system restart re-creates the service with no Flutter engine to repeat it.
+        context?.let { LocationUpdatesService.saveServiceConfig(it) }
+
         if (service != null) {
             service?.updateNotification()
             context?.let { LifecycleLogger.log(it, "setAndroidNotification: Notification updated") }
@@ -261,6 +265,11 @@ class BackgroundLocationService: MethodChannel.MethodCallHandler {
         if (timeInterval != null) {
             LocationUpdatesService.UPDATE_INTERVAL_IN_MILLISECONDS = timeInterval
             LocationUpdatesService.FASTEST_UPDATE_INTERVAL_IN_MILLISECONDS = timeInterval/2
+
+            // Persist alongside the notification copy: this is the only route the interval
+            // takes into the service, so without it a restarted service reverts to the 1s
+            // default and burns battery at 30x the backgrounded rate.
+            context?.let { LocationUpdatesService.saveServiceConfig(it) }
         }
 
         service?.createLocationRequest(0.0);

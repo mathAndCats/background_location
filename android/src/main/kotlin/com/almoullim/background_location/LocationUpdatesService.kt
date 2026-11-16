@@ -56,6 +56,10 @@ class LocationUpdatesService : Service() {
     private var isGoogleApiAvailable: Boolean = false
     private var isStarted: Boolean = false
 
+    /// The last startForeground() attempt was refused by the OS (see updateNotification()).
+    /// Read by onStartCommand(), which stops the service rather than run it un-promoted.
+    private var promotionRefused: Boolean = false
+
     companion object {
         var NOTIFICATION_TITLE = "Background service is running"
         var NOTIFICATION_MESSAGE = "Background service is running"
@@ -379,25 +383,45 @@ class LocationUpdatesService : Service() {
         LifecycleLogger.log(this, "updateNotification: isStarted=$isStarted")
 
         if (!isStarted) {
-            isStarted = true
             LifecycleLogger.log(this, "updateNotification: calling startForeground with NOTIFICATION_ID=$NOTIFICATION_ID")
 
-            // ALWAYS promote — never gate this on isAppInForeground(). Once
+            // ALWAYS attempt the promote — never gate it on isAppInForeground(). Once
             // startForegroundService() has been called, Android requires startForeground()
             // within ~5s or it kills us with ForegroundServiceDidNotStartInTimeException (an
-            // async RemoteServiceException that no try/catch can intercept). The
-            // background-start case is guarded at the START site (reallyStartLocationService),
-            // so reaching here means the promote is permitted. The old isAppInForeground()
-            // gate both CAUSED this crash and was unreliable — it false-negatives for
-            // genuinely-foreground apps because runningAppProcesses importance is racy and the
-            // check demanded an exact == IMPORTANCE_FOREGROUND.
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                startForeground(NOTIFICATION_ID, notification.build(), ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
-            } else {
-                startForeground(NOTIFICATION_ID, notification.build())
+            // async RemoteServiceException that no try/catch can intercept). The old
+            // isAppInForeground() gate both CAUSED that crash and was unreliable — it
+            // false-negatives for genuinely-foreground apps because runningAppProcesses
+            // importance is racy and the check demanded an exact == IMPORTANCE_FOREGROUND.
+            //
+            // But attempting is not the same as being allowed. The START site
+            // (reallyStartLocationService) guards a fresh start, and that guard is not on every
+            // path here: when Android re-creates a killed service (START_REDELIVER_INTENT), it
+            // runs onCreate -> here with no Dart and no permission check in front of it. On
+            // Android 14+ a location-type promote then throws SecurityException from
+            // validateForegroundServiceType whenever the app cannot use location right now:
+            // a "while in use" grant with the restart landing in the background, or a one-time
+            // ("Only this time") grant that expired after the kill. Uncaught, that crashes the
+            // process during launch, before Dart can run and re-ask for permission. Note that
+            // checkSelfPermission() cannot pre-empt this: it reports GRANTED for a while-in-use
+            // permission even when the app is in the background, so the only reliable signal
+            // is the exception itself.
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    startForeground(NOTIFICATION_ID, notification.build(), ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+                } else {
+                    startForeground(NOTIFICATION_ID, notification.build())
+                }
+                isStarted = true
+                promotionRefused = false
+                LifecycleLogger.log(this, "updateNotification: startForeground called")
+            } catch (e: SecurityException) {
+                // Stay un-promoted and let onStartCommand() stop us. Recording state is left
+                // alone on purpose: Dart restores the hike on launch and sets it from its own
+                // saved state, then starts this service again through the guarded path once
+                // it holds a usable permission.
+                promotionRefused = true
+                LifecycleLogger.log(this, "updateNotification: startForeground refused: ${e.message}")
             }
-
-            LifecycleLogger.log(this, "updateNotification: startForeground called")
 
         } else {
             val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -487,6 +511,17 @@ class LocationUpdatesService : Service() {
         // delivers no intent at all.
         val distanceFilter = intent?.getDoubleExtra("distance_filter", 0.0) ?: 0.0
         forceLocationManager = intent?.getBooleanExtra("force_location_manager", false) ?: false
+
+        // onCreate() could not promote us (the OS refused startForeground; see
+        // updateNotification()). Stop here rather than in onCreate(): this start is the one
+        // being delivered, and stopping before it arrived would just let it bring us back.
+        // START_NOT_STICKY plus the argless stopSelf() drop the pending redelivery, so
+        // Android does not schedule another restart that would be refused the same way.
+        if (promotionRefused) {
+            LifecycleLogger.log(this, "onStartCommand: not promoted to foreground — stopping")
+            stopSelf()
+            return START_NOT_STICKY
+        }
 
         // Don't come back as a zombie. A redelivered start means Android re-created us after
         // a kill; if nothing is being recorded then nobody is waiting on this service. The
